@@ -12,6 +12,7 @@ OSC_PORT = 6448
 OSC_ADDR = "/wek/inputs"
 
 
+
 client = udp_client.SimpleUDPClient(OSC_IP, OSC_PORT) #creates a UDP socket that knows where to send the data
 
 #Recording settings
