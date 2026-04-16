@@ -4,14 +4,11 @@ from datasets import Audio, load_dataset
 import parselmouth
 from parselmouth.praat import call
 
-SAMPLE_RATE = 48000
+from multiprocessing import Pool, cpu_count
+from tqdm import tqdm
 
-# Cleans male_ and female_ prefixes from labels
-def clean_prefix(batch):
-    return {
-        key: [v.replace("female_", "").replace("male_", "") if isinstance(v, str) else v for v in values]
-        for key, values in batch.items()
-    }
+SAMPLE_RATE = 48000
+OUTPUT_FILE = "data/features.csv"
 
 # Extracts features from audio
 def extract_features(audio):
@@ -26,10 +23,7 @@ def extract_features(audio):
     
     mean_pitch = float(np.mean(pitch_values))
 
-    # try:
-    #     point_process = call(sound, "To PointProcess (periodic, praat)", 75, 500)
-    # except:
-    #     point_process = call(sound, "To PointProcess (periodic, cc)", 75, 500)
+    # point_process = call(sound, "To PointProcess (periodic, praat)", 75, 500)
     point_process = call(sound, "To PointProcess (periodic, cc)", 75, 500)
 
     try:
@@ -40,34 +34,45 @@ def extract_features(audio):
 
     return jitter, shimmer, mean_pitch
 
+def process_row(data_row):
+    audio = data_row["audio"]
+    features = extract_features(audio)
+
+    if features is None:
+        return None
+
+    return {
+        "label": data_row["labels"],
+        "jitter": features[0],
+        "shimmer": features[1],
+        "mean_pitch": features[2]
+    }
+
+def decode(sample):
+    sample["audio"] = sample["audio"]["array"]
+    return sample
+
 if __name__ == "__main__":
     # Prepare dataset
-    ds = load_dataset("Huan0806/gender_emotion_recognition")
-    ds = ds["train"].remove_columns(["source"])
-    ds = ds.map(clean_prefix, batched = True)
-    ds = ds.cast_column("audio", Audio(sampling_rate = SAMPLE_RATE))
+    dataset = load_dataset("Huan0806/gender_emotion_recognition")
+    dataset = dataset["train"].remove_columns(["source"])
+    dataset = dataset.cast_column("audio", Audio(sampling_rate = SAMPLE_RATE))
+    dataset = dataset.map(decode, num_proc = cpu_count())
+    df: pd.DataFrame = dataset.to_pandas()
+    df["labels"] = df["labels"].str.replace("female_", "", regex=False).str.replace("male_", "", regex=False)
 
-    rows = []
-    progress = 0
-    length = len(ds)
+    rows = df.to_dict("records")
+    results = []
 
-    for data_row in ds:
-        audio = data_row["audio"]["array"]
-        features = extract_features(audio)
+    # Use multiprocessing to extract features in parallel
+    with Pool(cpu_count()) as pool:
+        for res in tqdm(pool.imap_unordered(process_row, rows, chunksize=10), total=len(rows), desc="Extracting features"):
+            results.append(res)
 
-        if features is None:
-            continue
+    # Filer out any None results (failed extractions) and create a DataFrame
+    results = [r for r in results if r is not None]
+    results_df = pd.DataFrame(results)
 
-        rows.append({
-            "label": data_row["labels"],
-            "jitter": features[0],
-            "shimmer": features[1],
-            "mean_pitch": features[2]
-        })
-
-        progress += 1
-        print(f"Progress: {progress}/{length}", end = "\r")
-
-    df = pd.DataFrame(rows)
-    print(df.head())
-    df.to_csv("data/features.csv", index = False)
+    print(results_df.head())
+    results_df.to_csv(OUTPUT_FILE, index = False)
+    print(f"Saved features to {OUTPUT_FILE}")
