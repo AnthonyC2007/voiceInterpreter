@@ -1,3 +1,7 @@
+# If you want to run this code locally, make sure to install torch, torchaudio and torchcodec according to these instructions:
+# https://pytorch.org/get-started/locally/
+# https://github.com/meta-pytorch/torchcodec?tab=readme-ov-file#installing-torchcodec
+
 import pandas as pd
 import numpy as np
 from datasets import Audio, load_dataset
@@ -5,7 +9,7 @@ import parselmouth
 from parselmouth.praat import call
 
 from multiprocessing import Pool, cpu_count
-from tqdm import tqdm
+from tqdm import tqdm # For progress bar
 
 SAMPLE_RATE = 48000
 OUTPUT_FILE = "data/features.csv"
@@ -34,6 +38,7 @@ def extract_features(audio):
 
     return jitter, shimmer, mean_pitch
 
+# Helper method to process each row of the dataset in parallel
 def process_row(data_row):
     audio = data_row["audio"]
     features = extract_features(audio)
@@ -48,7 +53,8 @@ def process_row(data_row):
         "mean_pitch": features[2]
     }
 
-def decode(sample):
+# Audio object is with metadata. We only need the raw audio array.
+def extract_raw_audio(sample):
     sample["audio"] = sample["audio"]["array"]
     return sample
 
@@ -57,22 +63,22 @@ if __name__ == "__main__":
     dataset = load_dataset("Huan0806/gender_emotion_recognition")
     dataset = dataset["train"].remove_columns(["source"])
     dataset = dataset.cast_column("audio", Audio(sampling_rate = SAMPLE_RATE))
-    dataset = dataset.map(decode, num_proc = cpu_count())
+    dataset = dataset.map(extract_raw_audio, num_proc = cpu_count())
     df: pd.DataFrame = dataset.to_pandas()
     df["labels"] = df["labels"].str.replace("female_", "", regex=False).str.replace("male_", "", regex=False)
 
+    # Use multiprocessing to extract features in parallel
     rows = df.to_dict("records")
     results = []
 
-    # Use multiprocessing to extract features in parallel
     with Pool(cpu_count()) as pool:
         for res in tqdm(pool.imap_unordered(process_row, rows, chunksize=10), total=len(rows), desc="Extracting features"):
             results.append(res)
 
-    # Filer out any None results (failed extractions) and create a DataFrame
+    # Filter out any None results (failed extractions) and create a DataFrame
     results = [r for r in results if r is not None]
-    results_df = pd.DataFrame(results)
+    results = pd.DataFrame(results)
 
-    print(results_df.head())
-    results_df.to_csv(OUTPUT_FILE, index = False)
+    print(results.head())
+    results.to_csv(OUTPUT_FILE, index = False)
     print(f"Saved features to {OUTPUT_FILE}")
