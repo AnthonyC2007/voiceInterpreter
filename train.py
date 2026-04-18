@@ -45,11 +45,15 @@ def test_model(model, X_test, Y_test):
         correct = (predicted == Y_test).sum().item()
         return correct / total
 
+def normalize_features(df):
+    df["mean_pitch"] = df["mean_pitch"]-75
+    df["mean_pitch"] = df["mean_pitch"]/425
+    return df
+
 if __name__ == "__main__":
     # Load features
     df = pd.read_csv("data/features.csv")
-    df["mean_pitch"] = df["mean_pitch"]-75
-    df["mean_pitch"] = df["mean_pitch"]/425
+    df = normalize_features(df)
     train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
     X_train = train_df[["jitter", "shimmer", "mean_pitch"]].values
     Y_train = train_df["label"].map(classes).values
@@ -83,7 +87,7 @@ if __name__ == "__main__":
             loss_history.append(loss.item())
             accuracy = test_model(model, X_test_tensor, Y_test_tensor)
             acc_history.append(accuracy)
-            print(f"Epoch {epoch+1}/{EPOCHS}, Loss: {loss.item():.4f}, Accuracy: {accuracy:.4f}")
+            print(f"Epoch {epoch+1}/{EPOCHS}, Loss: {loss.item():.4f}, Accuracy: {accuracy*100:.2f}%")
 
     fig, ax = plt.subplots(1, 2, figsize=(10, 8))
 
