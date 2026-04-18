@@ -12,7 +12,8 @@ from multiprocessing import Pool, cpu_count
 from tqdm import tqdm # For progress bar
 
 SAMPLE_RATE = 48000
-OUTPUT_FILE = "data/features_new.csv"
+OUTPUT_FILE = "data/features.csv"
+OUTPUT_FILE_NORMALIZED = "data/features_normalized.csv"
 
 # Extracts features from audio
 def get_pitch_features(sound):
@@ -117,6 +118,88 @@ def extract_raw_audio(sample):
     sample["audio"] = sample["audio"]["array"]
     return sample
 
+# Normalizes features
+def normalize_features(df):
+    df = df.copy()
+
+    # --- oddziel label ---
+    labels = df["label"]
+    features = df.drop(columns=["label"])
+
+    # --- zakresy fizyczne ---
+    RANGES = {
+        "pitch": (75, 500),
+        "intensity_mean": (30, 100),
+        "intensity_std": (0, 30),
+        "f1_mean": (200, 1000),
+        "f2_mean": (500, 3000),
+        "f3_mean": (1500, 5000),
+        "hnr_mean": (0, 40),
+        "jitter": (1e-5, 0.02),
+        "shimmer": (1e-5, 0.1),
+    }
+
+    def minmax(series, xmin, xmax):
+        x = (series - xmin) / (xmax - xmin)
+        return x.clip(0.0, 1.0)
+
+    def log_minmax(series, xmin, xmax):
+        series = series.clip(lower=xmin)  # zabezpieczenie przed log(0)
+        x = np.log(series)
+        xmin = np.log(xmin)
+        xmax = np.log(xmax)
+        x = (x - xmin) / (xmax - xmin)
+        return pd.Series(x, index=series.index).clip(0.0, 1.0)
+
+    # --- Z-score (tylko wybrane cechy) ---
+    zscore_features = ["pitch_std", "pitch_range"]
+
+    z_stats = {}
+    for col in zscore_features:
+        if col in features.columns:
+            mean = features[col].mean()
+            std = features[col].std() + 1e-8
+            z_stats[col] = (mean, std)
+
+    # --- normalizacja ---
+    out = features.copy()
+
+    # --- PITCH (range-based) ---
+    for col in ["pitch_mean", "pitch_min", "pitch_max"]:
+        if col in out.columns:
+            out[col] = minmax(out[col], *RANGES["pitch"])
+
+    # --- Z-SCORE ---
+    for col, (mean, std) in z_stats.items():
+        out[col] = (out[col] - mean) / std
+
+    # --- INTENSITY ---
+    if "intensity_mean" in out.columns:
+        out["intensity_mean"] = minmax(out["intensity_mean"], *RANGES["intensity_mean"])
+
+    if "intensity_std" in out.columns:
+        out["intensity_std"] = minmax(out["intensity_std"], *RANGES["intensity_std"])
+
+    # --- FORMANTY ---
+    for col in ["f1_mean", "f2_mean", "f3_mean"]:
+        if col in out.columns:
+            out[col] = log_minmax(out[col], *RANGES[col])
+
+    # --- HNR ---
+    if "hnr_mean" in out.columns:
+        out["hnr_mean"] = out["hnr_mean"] #minmax(out["hnr_mean"], *RANGES["hnr_mean"])
+
+    # --- JITTER / SHIMMER ---
+    if "jitter" in out.columns:
+        out["jitter"] = out["jitter"] #log_minmax(out["jitter"], *RANGES["jitter"])
+
+    if "shimmer" in out.columns:
+        out["shimmer"] = out["shimmer"] #log_minmax(out["shimmer"], *RANGES["shimmer"])
+
+    out["label"] = labels
+
+    return out
+
 if __name__ == "__main__":
     # Prepare dataset
     dataset = load_dataset("Huan0806/gender_emotion_recognition")
@@ -140,4 +223,10 @@ if __name__ == "__main__":
 
     print(results.head())
     results.to_csv(OUTPUT_FILE, index = False)
-    print(f"Saved features to {OUTPUT_FILE}")
+    print(f"Saved features to {OUTPUT_FILE}\n")
+
+    results_normalized = normalize_features(results)
+    print(results_normalized.head())
+    results_normalized.to_csv(OUTPUT_FILE_NORMALIZED, index = False)
+    print(f"Saved normalized features to {OUTPUT_FILE_NORMALIZED}")
+    
