@@ -81,8 +81,9 @@ if __name__ == "__main__":
         if epoch % 100 == 0:
             epochs_history.append(epoch)
             loss_history.append(loss.item())
-            acc_history.append(test_model(model, X_test_tensor, Y_test_tensor))
-            print(f"Epoch {epoch+1}/{EPOCHS}, Loss: {loss.item():.4f}")
+            accuracy = test_model(model, X_test_tensor, Y_test_tensor)
+            acc_history.append(accuracy)
+            print(f"Epoch {epoch+1}/{EPOCHS}, Loss: {loss.item():.4f}, Accuracy: {accuracy:.4f}")
 
     fig, ax = plt.subplots(1, 2, figsize=(10, 8))
 
