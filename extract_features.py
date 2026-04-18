@@ -12,21 +12,61 @@ from multiprocessing import Pool, cpu_count
 from tqdm import tqdm # For progress bar
 
 SAMPLE_RATE = 48000
-OUTPUT_FILE = "data/features.csv"
+OUTPUT_FILE = "data/features_new.csv"
 
 # Extracts features from audio
-def extract_features(audio):
-    sound = parselmouth.Sound(audio, sampling_frequency = SAMPLE_RATE)
+def get_pitch_features(sound):
+    pitch = sound.to_pitch(time_step=0.01, pitch_floor=75, pitch_ceiling=500)
+    values = pitch.selected_array['frequency']
+    voiced = values[values > 0]
 
-    pitch = sound.to_pitch(time_step = 0.01, pitch_floor = 75, pitch_ceiling = 500.0)
-    pitch_values = pitch.selected_array['frequency']
-
-    voiced = pitch_values[pitch_values > 0]
     if len(voiced) < 5:
         return None
-    
-    mean_pitch = float(np.mean(pitch_values))
 
+    return {
+        "pitch_mean": float(np.mean(voiced)),
+        "pitch_std": float(np.std(voiced)),
+        "pitch_min": float(np.min(voiced)),
+        "pitch_max": float(np.max(voiced)),
+        "pitch_range": float(np.max(voiced) - np.min(voiced))
+    }
+
+def get_intensity_features(sound):
+    intensity = sound.to_intensity()
+    values = intensity.values[0]
+
+    return {
+        "intensity_mean": float(np.mean(values)),
+        "intensity_std": float(np.std(values))
+    }
+
+def get_formant_features(sound):
+    formant = sound.to_formant_burg()
+
+    f1 = []
+    f2 = []
+    f3 = []
+
+    for t in np.arange(0, sound.duration, 0.01):
+        f1.append(formant.get_value_at_time(1, t))
+        f2.append(formant.get_value_at_time(2, t))
+        f3.append(formant.get_value_at_time(3, t))
+
+    return {
+        "f1_mean": float(np.nanmean(f1)),
+        "f2_mean": float(np.nanmean(f2)),
+        "f3_mean": float(np.nanmean(f3))
+    }
+
+def get_hnr_features(sound):
+    harmonicity = sound.to_harmonicity()
+    values = harmonicity.values[0]
+
+    return {
+        "hnr_mean": float(np.mean(values))
+    }
+
+def get_jitter_shimmer_features(sound):
     # point_process = call(sound, "To PointProcess (periodic, praat)", 75, 500)
     point_process = call(sound, "To PointProcess (periodic, cc)", 75, 500)
 
@@ -36,7 +76,31 @@ def extract_features(audio):
     except:
         return None
 
-    return jitter, shimmer, mean_pitch
+    return {
+        "jitter": jitter,
+        "shimmer": shimmer
+    }
+
+def extract_features(audio):
+    sound = parselmouth.Sound(audio, sampling_frequency = SAMPLE_RATE)
+
+    features = {}
+
+    extractors = [
+        get_pitch_features,
+        get_intensity_features,
+        get_formant_features,
+        get_hnr_features,
+        get_jitter_shimmer_features
+    ]
+
+    for extractor in extractors:
+        result = extractor(sound)
+        if result is None:
+            return None
+        features.update(result)
+
+    return features
 
 # Helper method to process each row of the dataset in parallel
 def process_row(data_row):
@@ -46,12 +110,7 @@ def process_row(data_row):
     if features is None:
         return None
 
-    return {
-        "label": data_row["labels"],
-        "jitter": features[0],
-        "shimmer": features[1],
-        "mean_pitch": features[2]
-    }
+    return features | {"label": data_row["labels"]}
 
 # Audio object is with metadata. We only need the raw audio array.
 def extract_raw_audio(sample):
