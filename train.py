@@ -48,6 +48,8 @@ def test_model(model, X_test, Y_test):
 if __name__ == "__main__":
     # Load features
     df = pd.read_csv("data/features.csv")
+    df["mean_pitch"] = df["mean_pitch"]-75
+    df["mean_pitch"] = df["mean_pitch"]/425
     train_df, test_df = train_test_split(df, test_size=0.2, random_state=42)
     X_train = train_df[["jitter", "shimmer", "mean_pitch"]].values
     Y_train = train_df["label"].map(classes).values
