@@ -7,8 +7,8 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 LEARNING_RATE = 0.001
-BATCH_SIZE = 16
-EPOCHS = 16
+BATCH_SIZE = 32
+EPOCHS = 512
 
 classes = {
     "neutral": 0,
@@ -22,14 +22,16 @@ classes = {
 class Model(nn.Module):
     def __init__(self, input_size=3):
         super().__init__()
-        self.relu = nn.ReLU()
+        self.relu = nn.LeakyReLU(0.01)
         self.drop = nn.Dropout(0.2)
-        self.l1 = nn.Linear(input_size, 32)
-        self.l2 = nn.Linear(32, 16)
-        self.l3 = nn.Linear(16, 6)
+        self.bnorm1 = nn.BatchNorm1d(64)
+        self.l1 = nn.Linear(input_size, 64)
+        self.l2 = nn.Linear(64, 32)
+        self.l3 = nn.Linear(32, 6)
 
     def forward(self, x):
         out = self.l1(x)
+        out = self.bnorm1(out)
         out = self.relu(out)
         out = self.l2(out)
         out = self.drop(out)
@@ -80,26 +82,13 @@ def load_dataset(features, device):
 
     return train_dataset, test_dataset
 
-if __name__ == "__main__":
-    #Configure torch
-    device = get_device()
-
-    # Load features
-    train_dataset, test_dataset = load_dataset(["pitch_mean", "pitch_std", "intensity_mean", "intensity_std", "f1_mean", "hnr_mean", "jitter"], device)
-    train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, pin_memory=True)
-
-    # Create model, loss function, and optimizer
-    model = Model(input_size=7)
-    #model.compile()
-    model.to(device)
-
-    loss_fn = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
-
-    epochs_history = []
+def train(model, train_dataloader, test_dataset, loss_fn, optimizer, device):
     loss_history = []
+    acc_history = []
+    epochs_history = []
 
-    # Training loop
+    last_acc = 0.0
+
     pbar = tqdm(range(EPOCHS), desc="Training", ncols=100)
     for epoch in pbar:
         model.train()
@@ -117,19 +106,54 @@ if __name__ == "__main__":
 
             epoch_loss += loss.detach()
 
-        avg_loss = epoch_loss.item() / len(train_dataloader)
-        loss_history.append(avg_loss)
+        if (epoch+1) % 16 == 0:
+            accuracy = model.test(test_dataset)
+            last_acc = accuracy
 
-        postfix = {"Loss": f"{avg_loss:.4f}"}
+            acc_history.append(accuracy)
+            loss_history.append(epoch_loss.item() / len(train_dataloader))
+            epochs_history.append(epoch + 1)
+
+        postfix = {"Acc": f"{last_acc*100:.2f}%"}
         pbar.set_postfix(postfix)
+
+    return loss_history, acc_history, epochs_history
+
+if __name__ == "__main__":
+    #Configure torch
+    device = get_device()
+    torch.backends.cudnn.benchmark = True
+
+    # Load features
+    train_dataset, test_dataset = load_dataset(["pitch_mean", "pitch_std", "intensity_mean", "intensity_std", "f1_mean", "jitter"], device)
+    train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, pin_memory=False)
+
+    # Create model, loss function, and optimizer
+    model = Model(input_size=6)
+    #model.compile()
+    model.to(device)
+
+    loss_fn = nn.CrossEntropyLoss()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-5)
+
+    loss_history, acc_history, epochs_history = train(model, train_dataloader, test_dataset, loss_fn, optimizer, device)
 
     final_acc = model.test(test_dataset)
     print(f"Final Test Accuracy: {final_acc*100:.2f}%")
+    final_train_acc = model.test(train_dataset)
+    print(f"Final Train Accuracy: {final_train_acc*100:.2f}%")
 
-    fig, ax = plt.subplots()
-    ax.set_xlabel("Epoch")
-    ax.plot(range(len(loss_history)), loss_history, label="Training Loss")
-    ax.set_ylabel("Loss")
-    ax.set_title("Training Loss Over Epochs")
-    ax.legend()
+    fig, ax = plt.subplots(2, 1, figsize=(10, 8))
+    ax[0].set_xlabel("Epoch")
+    ax[0].plot(epochs_history, loss_history, label="Training Loss")
+    ax[0].set_ylabel("Loss")
+    ax[0].set_title("Training Loss Over Epochs")
+    ax[0].legend()
+
+    ax[1].set_xlabel("Epoch")
+    ax[1].plot(epochs_history, acc_history, label="Training Accuracy")
+    ax[1].set_ylim(0, max(acc_history) * 1.1)
+    ax[1].set_ylabel("Accuracy")
+    ax[1].set_title("Training Accuracy Over Epochs")
+    ax[1].legend()
     plt.show()
