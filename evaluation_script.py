@@ -1,11 +1,20 @@
-# If you want to run this code locally, make sure to install torch, torchaudio and torchcodec according to these instructions:
-# https://pytorch.org/get-started/locally/
-
 import librosa
 import numpy as np
+import sounddevice as sd
 import torch
 import torch.nn as nn
 from pythonosc import udp_client
+import time
+
+OSC_IP = "127.0.0.1"
+OSC_PORT = 57120
+OSC_ADDR = "/emotions"
+
+SAMPLE_RATE = 16000
+DURATION_SEC = 3
+MODEL_PATH = "data/crnn_66_73.pth"
+
+EMOTIONS = ["neutral", "sad", "fear", "happy", "disgust", "angry"]
 
 class Model(nn.Module):
     def __init__(self):
@@ -71,30 +80,41 @@ def extract_log_mel(audio, sr=16000, n_mels=64, hop_length=256, max_len=300):
     return log_mel.astype(np.float32)
 
 if __name__ == "__main__":
-    #Configure torch
     if torch.cuda.is_available():
-        print("Using CUDA")
         device = torch.device("cuda")
-        torch.backends.cudnn.benchmark = True
     elif torch.xpu.is_available():
-        print("Using XPU")
-        device =  torch.device("xpu")
+        device = torch.device("xpu")
     else:
-        print("Using CPU")
         device = torch.device("cpu")
 
     model = Model()
-    model.load_state_dict(torch.load("data/crnn_66_73.pth", weights_only=True))
+    model.load_state_dict(torch.load(MODEL_PATH, weights_only=True, map_location=device))
     model.to(device)
     model.eval()
 
-    osc_client = udp_client.SimpleUDPClient("127.0.0.1", 57120)
+    osc_client = udp_client.SimpleUDPClient(OSC_IP, OSC_PORT)
 
-    # We need audio in 16kHz in array form.
+    print(f"Sending to {OSC_IP}:{OSC_PORT}{OSC_ADDR}")
+    print(f"Emotions order: {EMOTIONS}")
+    print("Press Ctrl+C to stop.\n")
+
     while True:
-        audio: np.ndarray = np.ndarray([])  # Replace with actual audio data
-        log_mel_tensor = torch.from_numpy(extract_log_mel(audio)).unsqueeze(0).to(device)  # (1, T, F)
-        probabilities = model(log_mel_tensor).cpu().detach().numpy()[0]  # (6,)
-        print(probabilities)
+        audio = sd.rec(int(DURATION_SEC * SAMPLE_RATE), samplerate=SAMPLE_RATE, channels=1, dtype="float32")
+        sd.wait()
+        audio = audio.flatten()
 
-        osc_client.send_message("/emotions", probabilities.tolist())
+        if np.abs(audio).max() < 0.01:
+            print("Silence -- skipping")
+            time.sleep(0.05)
+            continue
+
+        log_mel_tensor = torch.from_numpy(extract_log_mel(audio)).unsqueeze(0).to(device)
+
+        with torch.no_grad():
+            probs = model(log_mel_tensor).cpu().numpy()[0].tolist()
+
+        top = EMOTIONS[int(np.argmax(probs))]
+        print(f"-> {top:8s}  {[f'{p:.2f}' for p in probs]}")
+
+        osc_client.send_message(OSC_ADDR, probs)
+        time.sleep(0.05)
