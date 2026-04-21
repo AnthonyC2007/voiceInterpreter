@@ -283,6 +283,26 @@ def load_dataset():
 
     return train_dataset, test_dataset
 
+def plot(loss_history, accuracy_history):
+    fig, ax = plt.subplots(1, 2, figsize=(10, 8))
+    ax[0].set_xlabel("Epoch")
+    ax[0].plot(range(len(loss_history)), loss_history, label="Training Loss")
+    ax[0].set_ylim(0, max(loss_history)*1.2)
+    ax[0].set_ylabel("Loss")
+    ax[0].set_title("Training Loss Over Epochs")
+    ax[0].grid()
+    ax[0].legend()
+
+    ax[1].set_xlabel("Epoch")
+    ax[1].plot(range(len(accuracy_history)), accuracy_history, label="Test Accuracy")
+    ax[1].set_ylim(0, 1)
+    ax[1].set_ylabel("Accuracy")
+    ax[1].set_title("Test Accuracy Over Epochs")
+    ax[1].grid()
+    ax[1].legend()
+
+    plt.show()
+
 def train(model, train_dataloader, test_dataset, loss_fn, optimizer, device):
     loss_history = []
     accuracy_history = []
@@ -329,7 +349,7 @@ if __name__ == "__main__":
     train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True)
 
     #Initialize model, loss function and optimizer
-    model = CNN()
+    model = CRNN()
     model = model.to(device)
     print(f"Initial Test Accuracy: {model.test(test_dataset, device)*100:.2f}%")  # Warm up the model
 
@@ -339,25 +359,13 @@ if __name__ == "__main__":
     #Train and test
     loss_hist, accuracy_hist = train(model, train_loader, test_dataset, loss_fn, optimizer, device)
 
-    print(f"Final Test Accuracy: {model.test(test_dataset, device)*100:.2f}%")
-    print(f"Final Train Accuracy: {model.test(train_dataset, device)*100:.2f}%")
+    test_acc = model.test(test_dataset, device)
+    train_acc = model.test(train_dataset, device)
+    print(f"Final Test Accuracy: {test_acc*100:.2f}%")
+    print(f"Final Train Accuracy: {train_acc*100:.2f}%")
+
+    torch.save(model.state_dict(), f"data/crnn_{test_acc*100:.0f}_{train_acc*100:.0f}.pth")
+    print("Model saved")
 
     #Nice plot
-    fig, ax = plt.subplots(1, 2, figsize=(10, 8))
-    ax[0].set_xlabel("Epoch")
-    ax[0].plot(range(len(loss_hist)), loss_hist, label="Training Loss")
-    ax[0].set_ylim(0, max(loss_hist)*1.2)
-    ax[0].set_ylabel("Loss")
-    ax[0].set_title("Training Loss Over Epochs")
-    ax[0].grid()
-    ax[0].legend()
-
-    ax[1].set_xlabel("Epoch")
-    ax[1].plot(range(len(accuracy_hist)), accuracy_hist, label="Test Accuracy")
-    ax[1].set_ylim(0, 1)
-    ax[1].set_ylabel("Accuracy")
-    ax[1].set_title("Test Accuracy Over Epochs")
-    ax[1].grid()
-    ax[1].legend()
-
-    plt.show()
+    #plot(loss_hist, accuracy_hist)
