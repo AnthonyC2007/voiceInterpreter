@@ -10,12 +10,17 @@ from tqdm import tqdm
 LEARNING_RATE = 0.001
 WEIGHT_DECAY = 1e-4
 BATCH_SIZE = 32
-EPOCHS = 64
+EPOCHS = 50
 
 # B - Batch size
 # T - Time steps (300)
 # F - Frequency bins (64)
 # C - Channels (1 for log-mel, 2 for log-mel + mfcc)
+
+# Best results I've got
+# BATCH_SIZE = 32
+# EPOCHS = 50
+# CRNN model
 
 class CNN(nn.Module):
     def __init__(self):
