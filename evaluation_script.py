@@ -5,7 +5,7 @@ import librosa
 import numpy as np
 import torch
 import torch.nn as nn
-import pythonosc as osc
+from pythonosc import udp_client
 
 class Model(nn.Module):
     def __init__(self):
@@ -88,13 +88,13 @@ if __name__ == "__main__":
     model.to(device)
     model.eval()
 
-    # Set up OSC server
-    # We need audio in 16kHz in array form.
+    osc_client = udp_client.SimpleUDPClient("127.0.0.1", 57120)
 
+    # We need audio in 16kHz in array form.
     while True:
         audio: np.ndarray = np.ndarray([])  # Replace with actual audio data
         log_mel_tensor = torch.from_numpy(extract_log_mel(audio)).unsqueeze(0).to(device)  # (1, T, F)
-        probabilities = model(log_mel_tensor).cpu().detach().numpy()  # (1, 6)
+        probabilities = model(log_mel_tensor).cpu().detach().numpy()[0]  # (6,)
         print(probabilities)
 
-        # Send probabilities to via OSC
+        osc_client.send_message("/emotions", probabilities.tolist())
