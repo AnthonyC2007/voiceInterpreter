@@ -217,7 +217,12 @@ class CRNN(nn.Module):
 
         self.dropout = nn.Dropout(0.3)
 
-        self.fc = nn.Linear(128*2, 6)
+        self.fc = nn.Sequential(
+            nn.Linear(128*2, 64),
+            nn.ReLU(),
+            nn.Linear(64, 6),
+            nn.ReLU()
+        )
 
     def forward(self, x):
         x = x.unsqueeze(1)  # (B, 1, T, F)
@@ -265,18 +270,20 @@ class EmotionDataset(Dataset):
         return len(self.Y)
 
     def __getitem__(self, idx):
-        x = self.X[idx]  # (T, F)
-        y = self.Y[idx]
+        return self.X[idx], self.Y[idx]
 
-        return (torch.tensor(x, dtype=torch.float32), torch.tensor(y, dtype=torch.long))
-
-def load_dataset():
+def load_dataset(device):
     data = np.load("data/features_log_mel.npz")
     
     log_mel = data["log_mel"]  # (N, T, 64)
     labels = data["labels"]  # (N,)
 
     X_train, X_test, Y_train, Y_test = train_test_split(log_mel, labels, test_size=0.2, random_state=42)
+
+    X_train = torch.from_numpy(X_train).float().to(device, non_blocking=True)
+    X_test = torch.from_numpy(X_test).float().to(device, non_blocking=True)
+    Y_train = torch.from_numpy(Y_train).long().to(device, non_blocking=True)    
+    Y_test = torch.from_numpy(Y_test).long().to(device, non_blocking=True)
 
     train_dataset = EmotionDataset(X_train, Y_train)
     test_dataset = EmotionDataset(X_test, Y_test)
@@ -313,9 +320,6 @@ def train(model, train_dataloader, test_dataset, loss_fn, optimizer, device):
         epoch_loss = 0.0
 
         for X_batch, Y_batch in train_dataloader:
-            X_batch = X_batch.to(device, non_blocking=True)
-            Y_batch = Y_batch.to(device, non_blocking=True)
-
             outputs = model(X_batch)  # Add channel dimension
             loss = loss_fn(outputs, Y_batch)
 
@@ -325,8 +329,13 @@ def train(model, train_dataloader, test_dataset, loss_fn, optimizer, device):
 
             epoch_loss += loss.detach()
 
-        loss_history.append(epoch_loss.item()/BATCH_SIZE) # type: ignore
-        accuracy_history.append(model.test(test_dataset, device))
+        epoch_loss = epoch_loss.item() / len(train_dataloader) # type: ignore
+        accuracy = model.test(test_dataset, device)
+
+        loss_history.append(epoch_loss)
+        accuracy_history.append(accuracy)
+
+        pbar.set_postfix({"Loss": f"{epoch_loss:.4f}", "Acc": f"{accuracy*100:.2f}%"})
 
     return loss_history, accuracy_history
 
@@ -345,8 +354,8 @@ if __name__ == "__main__":
         device = torch.device("cpu")
 
     #Load dataset
-    train_dataset, test_dataset = load_dataset()
-    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True)
+    train_dataset, test_dataset = load_dataset(device)
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0, pin_memory=False)
 
     #Initialize model, loss function and optimizer
     model = CRNN()
@@ -364,8 +373,8 @@ if __name__ == "__main__":
     print(f"Final Test Accuracy: {test_acc*100:.2f}%")
     print(f"Final Train Accuracy: {train_acc*100:.2f}%")
 
-    torch.save(model.state_dict(), f"data/crnn_{test_acc*100:.0f}_{train_acc*100:.0f}.pth")
-    print("Model saved")
+    #torch.save(model.state_dict(), f"data/crnn_{test_acc*100:.0f}_{train_acc*100:.0f}.pth")
+    #print("Model saved")
 
     #Nice plot
-    #plot(loss_hist, accuracy_hist)
+    plot(loss_hist, accuracy_hist)
