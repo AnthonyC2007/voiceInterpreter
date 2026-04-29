@@ -217,12 +217,7 @@ class CRNN(nn.Module):
 
         self.dropout = nn.Dropout(0.3)
 
-        self.fc = nn.Sequential(
-            nn.Linear(128*2, 64),
-            nn.ReLU(),
-            nn.Linear(64, 6),
-            nn.ReLU()
-        )
+        self.fc = nn.Linear(128*2, 6)
 
     def forward(self, x):
         x = x.unsqueeze(1)  # (B, 1, T, F)
